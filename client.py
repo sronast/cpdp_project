@@ -24,6 +24,9 @@ ROAD_WIDTH = 400  # Adjust this value as needed
 LANE_COUNT = 4
 EDGE_WIDTH = 5  # Width of the black edges on the sides of the road
 
+distance_traveled = 0
+score = 0
+
 # Car settings
 CAR_WIDTH, CAR_HEIGHT = 100, 160
 car_img = pygame.image.load("./asset/car_black_small_5.png")
@@ -305,12 +308,17 @@ while running:
         #         restart_game()
 
     if not game_over:
+        distance_traveled += speed
+        score = int(distance_traveled * 0.1)
         update_car_movement()
         draw_bg()
         handle_road_and_lines()
         handle_dashed_lines()
         handle_entities(screen)
         entities.update()
+        font = pygame.font.SysFont(None, 36)
+        score_text = font.render(f"Score: {score}", True, BLACK)
+        screen.blit(score_text, (10, 10))
 
     if game_over:
         handle_game_over()
