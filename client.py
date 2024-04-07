@@ -26,6 +26,9 @@ EDGE_WIDTH = 5  # Width of the black edges on the sides of the road
 
 distance_traveled = 0
 score = 0
+RACE_DISTANCE = 10000
+game_won = False
+
 
 # Car settings
 CAR_WIDTH, CAR_HEIGHT = 100, 160
@@ -267,19 +270,30 @@ def handle_dashed_lines():
 
 
 def handle_game_over():
+    global game_won
     font = pygame.font.SysFont(None, 48)
     game_over_text = font.render("Game Over", True, RED)
     restart_text = font.render("Press Space to restart the game", True, BLACK)
+    game_won_text = font.render("You have completed the race", True, RED)
 
     game_over_rect = game_over_text.get_rect(
-        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20)
+        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40)
+    )
+    game_won_rect = game_won_text.get_rect(
+        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20)
     )
     restart_rect = restart_text.get_rect(
-        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 40)
+        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80)
     )
 
-    pygame.draw.rect(screen, WHITE, game_over_rect.inflate(20, 20))
-    screen.blit(game_over_text, game_over_rect)
+    if game_won is False:
+        pygame.draw.rect(screen, WHITE, game_over_rect.inflate(20, 20))
+        screen.blit(game_over_text, game_over_rect)
+    else:
+        pygame.draw.rect(screen, WHITE, game_won_rect.inflate(80, 20))
+        screen.blit(game_won_text, game_won_rect)
+        game_won = False
+
     # screen.blit(restart_text, restart_rect)
 
 
@@ -319,6 +333,9 @@ while running:
         font = pygame.font.SysFont(None, 36)
         score_text = font.render(f"Score: {score}", True, BLACK)
         screen.blit(score_text, (10, 10))
+        if distance_traveled >= RACE_DISTANCE:
+            game_over = True
+            game_won = True
 
     if game_over:
         handle_game_over()
