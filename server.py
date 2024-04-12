@@ -1,8 +1,15 @@
 import socket
 import threading
+import json
 
-HOST = '127.0.0.1'
-PORT = 8848
+HOST = "127.0.0.1"
+PORT = 8849
+SCREEN_WIDTH, SCREEN_HEIGHT = 1000, 800
+MID_ROAD = SCREEN_WIDTH // 2
+LANE_WIDTH = 100
+X1 = player_car_x = MID_ROAD - LANE_WIDTH // 2
+X2 = MID_ROAD + LANE_WIDTH // 2
+
 
 class RaceServer:
     def __init__(self):
@@ -10,34 +17,110 @@ class RaceServer:
         self.server_socket.bind((HOST, PORT))
         self.server_socket.listen(2)
         print("Server is listening for connections...")
-        self.players = []
-        self.lock = threading.Lock()
+        self.players = {}
+        self.game_state = "waiting"  # can be 'waiting', 'ready', 'started', 'finished'
+        self.lock = threading.RLock()
+        self.start_received = 0
+        self.player_score_dict = {}
 
-    def handle_client(self, conn, player):
+    def broadcast(self, message):
         with self.lock:
-            self.players.append(conn)
-        while True:
-            try:
-                data = conn.recv(1024)
+            for number, conn in self.players.items():
+                try:
+                    conn.sendall((message + "\n").encode())
+                    print(f"Sent to {conn.getpeername()}: {message}")
+                except Exception as e:
+                    print(f"Failed to send to {number}: {e}")
+
+    def handle_client(self, conn, player_number):
+        try:
+            with self.lock:
+                self.players[player_number] = conn
+                if len(self.players) == 2:
+                    self.game_state = "ready"
+                    self.broadcast(json.dumps({"action": "ready"}))
+                    self.start_game()
+
+            while True:
+                data = conn.recv(1024).decode()
                 if not data:
                     break
-                with self.lock:
-                    for player_conn in self.players:
-                        if player_conn != conn:
-                            player_conn.sendall(data)
-            except Exception as e:
-                print("Error handling client:", e)
-                break
+                message = json.loads(data)
+
+                if message.get("action") == "update_position":
+                    self.broadcast_to_others(player_number, json.dumps(message))
+
+                elif message.get("action") in ["start", "finish"]:
+                    self.handle_game_state_changes(message, player_number)
+
+        except Exception as e:
+            print("Error handling client:", e)
+        finally:
+            self.cleanup_player(player_number, conn)
+
+    def broadcast_to_others(self, sender_id, message):
         with self.lock:
-            self.players.remove(conn)
+            for player_id, conn in self.players.items():
+                if player_id != sender_id:
+                    try:
+                        conn.sendall((message + "\n").encode())
+                    except Exception as ex:
+                        print(f"Failed to send message to player {player_id}: {ex}")
+
+    def handle_game_state_changes(self, message, player_number):
+        action = message.get("action")
+        if action == "start":
+            # Handle start
+            pass
+        elif action == "finish":
+            # Handle finish
+            self.broadcast(json.dumps({"action": "finish", "winner": player_number}))
+
+    def cleanup_player(self, player_number, conn):
+        with self.lock:
+            if player_number in self.players:
+                del self.players[player_number]
+                self.broadcast(
+                    json.dumps({"action": "disconnect", "player": player_number})
+                )
+                if self.game_state != "finished":
+                    self.game_state = "waiting"
         conn.close()
+
+    def start_game(self):
+        setup_info = {
+            1: {
+                "position": (X1, SCREEN_HEIGHT - 180),
+                "color": "black",
+            },  # Left side start
+            2: {
+                "position": (X2, SCREEN_HEIGHT - 180),
+                "color": "blue",
+            },  # Right side start
+        }
+        for player_id, conn in self.players.items():
+            message = {
+                "action": "setup",
+                "player_number": player_id,
+                "your_color": setup_info[player_id]["color"],
+                "opponent_color": setup_info[3 - player_id][
+                    "color"
+                ],  # Gets the other player's color
+                "start_position": setup_info[player_id]["position"],
+                "opponent_start_position": setup_info[3 - player_id]["position"],
+            }
+            conn.sendall((json.dumps(message) + "\n").encode())
 
     def start(self):
         while True:
             conn, addr = self.server_socket.accept()
-            print(f"Player {len(self.players) + 1} connected.")
-            conn.send(f"You are Player {len(self.players) + 1}".encode())
-            threading.Thread(target=self.handle_client, args=(conn, len(self.players) + 1)).start()
+            player_number = len(self.players) + 1
+            print(f"Player {player_number} connected.")
+            conn.send(f"{player_number}".encode())
+            threading.Thread(
+                target=self.handle_client, args=(conn, player_number)
+            ).start()
+
 
 if __name__ == "__main__":
     race_server = RaceServer()

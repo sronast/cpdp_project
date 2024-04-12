@@ -2,129 +2,142 @@ import random
 import pygame
 import socket
 import threading
+import json
 
-# Set up pygame
+# Pygame setup
 pygame.init()
-
-# Set up the screen
 SCREEN_WIDTH, SCREEN_HEIGHT = 1000, 800
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Racing Game")
+pygame.display.set_caption("Multiplayer Racing Game")
 
-# Colors
+# Colors and Fonts
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GREEN = (0, 128, 0)
 YELLOW = (255, 255, 0)
-ROAD_COLOR = (100, 100, 100)  # Road color
+ROAD_COLOR = (100, 100, 100)
 RED = (255, 0, 0)
+FONT = pygame.font.SysFont(None, 36)
 
+# Game constants and variables
 LANE_WIDTH = 100
-ROAD_WIDTH = 400  # Adjust this value as needed
-LANE_COUNT = 4
-EDGE_WIDTH = 5  # Width of the black edges on the sides of the road
-
+ROAD_WIDTH = 400
+EDGE_WIDTH = 5
+MAX_OBSTACLES = 3
+MID_ROAD = SCREEN_WIDTH // 2
+speed = 4
 distance_traveled = 0
 score = 0
-RACE_DISTANCE = 10000
+RACE_DISTANCE = 100000
+WAITING_FOR_PLAYERS = 0
+COUNTDOWN = 1
+GAME_RUNNING = 2
 game_won = False
+game_state = WAITING_FOR_PLAYERS  # 0: Waiting, 1: Countdown, 2: Running
+countdown_timer = 3
+last_countdown_update = pygame.time.get_ticks()
 
 
-# Car settings
-CAR_WIDTH, CAR_HEIGHT = 100, 160
-car_img = pygame.image.load("./asset/car_black_small_5.png")
-car_img = pygame.transform.scale(car_img, (CAR_WIDTH, CAR_HEIGHT))
-
-car_ent = pygame.image.load("./asset/car_blue_small_5.png")
-car_ent = pygame.transform.scale(car_ent, (CAR_WIDTH, CAR_HEIGHT))
-
-rock_img = pygame.image.load("./asset/rock3.png")
-rock_img = pygame.transform.scale(rock_img, (CAR_WIDTH, CAR_HEIGHT))
-
-left_pressed = False
-right_pressed = False
-up_pressed = False
-down_pressed = False
-
-# Connect to server
+# Network setup
 HOST = "127.0.0.1"
-PORT = 8848
+PORT = 8849
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((HOST, PORT))
 player_num = client_socket.recv(1024).decode()
-print(player_num)
-last_obstacle_spawn_time = pygame.time.get_ticks()
+print(f"Connected as {player_num}")
 
 
-def receive_data():
-    while True:
-        try:
-            data = client_socket.recv(1024)
-            if data:
-                # Update game state based on received data
-                pass
-        except Exception as e:
-            print("Error receiving data:", e)
-            break
+def send_to_server(data):
+    """Helper function to send data to the server in JSON format."""
+    try:
+        json_data = json.dumps(data)
+        client_socket.sendall(json_data.encode("utf-8"))
+    except Exception as e:
+        print(f"Failed to send data to the server: {e}")
 
 
-# Start receiving data in a separate thread
-threading.Thread(target=receive_data, daemon=True).start()
-
-
+# Car class
 class Car(pygame.sprite.Sprite):
-    def __init__(self, image, x, y):
+    def __init__(self, image_path, x, y):
         super().__init__()
-        self.image = image
-        self.rect = self.image.get_rect(center=(x, y))
-        self.mask = pygame.mask.from_surface(self.image)
+        try:
+            self.image = pygame.image.load(image_path)
+            self.image = pygame.transform.scale(self.image, (100, 160))
+            self.rect = self.image.get_rect(center=(x, y))
+        except Exception as ex:
+            print(f"Failed to load image {image_path}: {ex}")
+        self.speed = 5
+        self.player_number = 0
+
+    def update_position(self, left, right, up, down):
+        moved = False
+        original_position = self.rect.copy()
+
+        # Calculate new proposed positions
+        new_x = self.rect.x
+        new_y = self.rect.y
+
+        if left:
+            new_x -= self.speed
+        if right:
+            new_x += self.speed
+        if up:
+            new_y -= self.speed
+        if down:
+            new_y += self.speed
+
+        # Check horizontal boundaries
+        if (
+            new_x >= (SCREEN_WIDTH - ROAD_WIDTH) // 2 + EDGE_WIDTH
+            and new_x + self.rect.width <= (SCREEN_WIDTH + ROAD_WIDTH) // 2 - EDGE_WIDTH
+        ):
+            self.rect.x = new_x
+            moved = True
+
+        # Check vertical boundaries (if needed)
+        if new_y >= 0 and new_y + self.rect.height <= SCREEN_HEIGHT:
+            self.rect.y = new_y
+            moved = True
+
+        if self.rect.colliderect(opponent_car_sprite.rect):
+            self.rect = original_position
+
+        # If the car moved, send the updated position to the server
+        if moved and self.rect != original_position:
+            d = {
+                "action": "update_position",
+                "x": self.rect.x,
+                "y": self.rect.y,
+                "player": self.player_number,
+            }
+            send_to_server(d)
 
 
+# Obstacle class
 class Obstacle(pygame.sprite.Sprite):
-    def __init__(self, image, x, y):
+    def __init__(self, image_path, x, y):
         super().__init__()
-        self.image = image
+        self.image = pygame.image.load(image_path)
+        self.image = pygame.transform.scale(self.image, (100, 160))
         self.rect = self.image.get_rect(center=(x, y))
-        self.mask = pygame.mask.from_surface(self.image)
+        self.speed = speed  # This might be updated dynamically based on game difficulty
 
     def update(self):
-        self.rect.y += speed
+        self.rect.y += self.speed
+        if self.rect.y > SCREEN_HEIGHT:
+            self.kill()
 
 
-# Game loop variables
-entities = pygame.sprite.Group()  # Group to hold all sprites
-car_sprite = Car(car_ent, SCREEN_WIDTH // 2, SCREEN_HEIGHT - CAR_HEIGHT)
-entities.add(car_sprite)
-speed = 4
-clock = pygame.time.Clock()
-running = True
-obstacle_count = 0
-start_time = pygame.time.get_ticks()
-MAX_OBSTACLES = 3
-last_spawn_time = start_time
-
-
-def spawn_obstacle():
-    global speed, MAX_OBSTACLES, last_spawn_time
-
-    # Increase obstacle speed gradually
-    if speed < 8:  # Maximum speed limit
-        speed += 0.1
-
-    # Increase obstacle frequency gradually
-    MAX_OBSTACLES += 0.01
-
-    # Randomly spawn obstacles
-    obstacle_x = random.randint(
-        (SCREEN_WIDTH - ROAD_WIDTH) // 2 + EDGE_WIDTH,
-        (SCREEN_WIDTH + ROAD_WIDTH) // 2 - EDGE_WIDTH - CAR_WIDTH,
-    )
-    obstacle_y = 0
-    obstacle = Obstacle(rock_img, obstacle_x, obstacle_y)
-    entities.add(obstacle)
-
-    # Update last obstacle spawn time
-    last_spawn_time = pygame.time.get_ticks()
+# Sprites setup
+player_x = player_car_x = MID_ROAD - LANE_WIDTH // 2
+car_sprite = Car("./asset/car_black_small_5.png", player_x, SCREEN_HEIGHT - 180)
+car_sprite.player_number = player_num
+opponent_car_x = MID_ROAD + LANE_WIDTH // 2
+opponent_car_sprite = Car(
+    "./asset/car_blue_small_5.png", opponent_car_x, SCREEN_HEIGHT - 180
+)
+obstacles = pygame.sprite.Group()
+all_sprites = pygame.sprite.Group()
 
 
 def handle_road_and_lines():
@@ -162,93 +175,110 @@ def handle_road_and_lines():
     )
 
 
-def draw_bg():
-    # Clear the screen
-    screen.fill(WHITE)
+def spawn_obstacle():
+    global last_obstacle_spawn_time
+    if pygame.time.get_ticks() - last_obstacle_spawn_time > 2000:
+        obstacle_x = random.randint(
+            SCREEN_WIDTH // 2 - ROAD_WIDTH // 2 + EDGE_WIDTH,
+            SCREEN_WIDTH // 2 + ROAD_WIDTH // 2 - EDGE_WIDTH,
+        )
+        obstacle = Obstacle("./asset/rock.png", obstacle_x, -100)
+        obstacles.add(obstacle)
+        all_sprites.add(obstacle)
+        last_obstacle_spawn_time = pygame.time.get_ticks()
 
-    # Draw green sides of the road
-    pygame.draw.rect(
-        screen, GREEN, (0, 0, (SCREEN_WIDTH - ROAD_WIDTH) // 2, SCREEN_HEIGHT)
+
+def handle_setup(data):
+    global car_sprite, opponent_car_sprite, all_sprites
+    if data["action"] == "setup":
+        # Initialize your car
+        car_color = data["your_color"]
+        car_start_pos = data["start_position"]
+        car_sprite = Car(f"./asset/car_{car_color}_small_5.png", *car_start_pos)
+
+        # Initialize opponent's car
+        opponent_color = data["opponent_color"]
+        opponent_start_pos = data["opponent_start_position"]
+        opponent_car_sprite = Car(
+            f"./asset/car_{opponent_color}_small_5.png", *opponent_start_pos
+        )
+
+        all_sprites.add(car_sprite, opponent_car_sprite)
+        print("added to all sprites")
+
+
+def receive_data():
+    buffer = ""
+    while True:
+        try:
+            data = client_socket.recv(1024).decode("utf-8")
+            if not data:
+                break
+            buffer += data  # Append new data to the buffer
+
+            while (
+                "\n" in buffer
+            ):  # Check if there are any complete messages with \n delimiter
+                message, buffer = buffer.split("\n", 1)  # Split on the first \n found
+                if message:
+                    json_data = json.loads(message)  # Parse the complete JSON message
+                    handle_message(json_data)  # Function to handle the parsed message
+
+        except Exception as e:
+            print("Error receiving data:", e)
+            break
+
+
+def handle_message(json_data):
+    global game_state, countdown_timer, opponent_car_sprite, all_sprites
+    print("Data received:", json_data)
+    if json_data["action"] == "ready":
+        game_state = COUNTDOWN
+    elif json_data["action"] == "start":
+        game_state = GAME_RUNNING
+    elif json_data["action"] == "update_position":
+        x = json_data["x"]
+        y = json_data["y"]
+        # if json_data["player"] != player_number:
+        opponent_car_sprite.rect.x = x
+        opponent_car_sprite.rect.y = y
+    elif json_data["action"] == "setup":
+        handle_setup(json_data)
+
+
+threading.Thread(target=receive_data, daemon=True).start()
+
+
+def draw_waiting_screen():
+    screen.fill(BLACK)
+    wait_text = FONT.render("Waiting for other player to join game...", True, WHITE)
+    screen.blit(
+        wait_text, (SCREEN_WIDTH // 2 - wait_text.get_width() // 2, SCREEN_HEIGHT // 2)
     )
-    pygame.draw.rect(
-        screen,
-        GREEN,
-        (
-            SCREEN_WIDTH // 2 + ROAD_WIDTH // 2,
-            0,
-            (SCREEN_WIDTH - ROAD_WIDTH) // 2,
-            SCREEN_HEIGHT,
-        ),
+    pygame.display.flip()
+
+
+def draw_countdown():
+    global countdown_timer, last_countdown_update, game_state
+    current_time = pygame.time.get_ticks()
+
+    if current_time - last_countdown_update > 1000:
+        countdown_timer -= 1
+        last_countdown_update = current_time
+        if countdown_timer <= 0:
+            countdown_timer = 0  # Prevent it from going below zero
+            print(f"Current game state is {game_state}")
+            if game_state != GAME_RUNNING:
+                send_to_server({"action": "start"})
+                game_state = GAME_RUNNING  # Ensure this change is made once
+
+    screen.fill(BLACK)
+    countdown_text = FONT.render(f"Game starting in {countdown_timer}...", True, WHITE)
+    screen.blit(
+        countdown_text,
+        (SCREEN_WIDTH // 2 - countdown_text.get_width() // 2, SCREEN_HEIGHT // 2),
     )
-
-
-def handle_keypress():
-    global left_pressed, right_pressed, up_pressed, down_pressed, game_over
-    for event in pygame.event.get():
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_LEFT:
-                left_pressed = True
-            elif event.key == pygame.K_RIGHT:
-                right_pressed = True
-            elif event.key == pygame.K_UP:
-                up_pressed = True
-            elif event.key == pygame.K_DOWN:
-                down_pressed = True
-            # elif event.key == pygame.K_SPACE and game_over:
-            #     restart_game()
-        elif event.type == pygame.KEYUP:
-            if event.key == pygame.K_LEFT:
-                left_pressed = False
-            elif event.key == pygame.K_RIGHT:
-                right_pressed = False
-            elif event.key == pygame.K_UP:
-                up_pressed = False
-            elif event.key == pygame.K_DOWN:
-                down_pressed = False
-
-
-def handle_entities(screen_to_draw):
-    global game_over, last_spawn_time
-    for entity in entities.sprites():
-        if isinstance(entity, Car):
-            screen_to_draw.blit(entity.image, entity.rect)
-        elif isinstance(entity, Obstacle):
-            screen_to_draw.blit(entity.image, entity.rect)
-            entity.update()  # Adjust speed as needed
-
-            # Check for collisions with player's car
-            if pygame.sprite.collide_mask(entity, car_sprite):
-                game_over = True
-
-            # Remove entities that have moved off-screen
-            if entity.rect.y > SCREEN_HEIGHT:
-                entity.kill()
-
-    if not game_over:
-        # Spawning obstacles
-        if len(entities.sprites()) < MAX_OBSTACLES:
-            current_time = pygame.time.get_ticks()
-            if current_time - last_spawn_time > random.randint(2000, 3000):
-                spawn_obstacle()
-                last_spawn_time = current_time
-
-
-def update_car_movement():
-    global car_x, car_y
-    if (
-        left_pressed
-        and car_sprite.rect.left > (SCREEN_WIDTH - ROAD_WIDTH) // 2 + EDGE_WIDTH
-    ):
-        car_sprite.rect.x -= 5
-    if (
-        right_pressed
-        and car_sprite.rect.right < (SCREEN_WIDTH + ROAD_WIDTH) // 2 - EDGE_WIDTH
-    ):
-        car_sprite.rect.x += 5
-    if up_pressed and car_sprite.rect.top > 0:
-        car_sprite.rect.y -= 5
-    if down_pressed and car_sprite.rect.bottom < SCREEN_HEIGHT:
-        car_sprite.rect.y += 5
+    pygame.display.flip()
 
 
 def handle_dashed_lines():
@@ -269,78 +299,66 @@ def handle_dashed_lines():
         pygame.draw.line(screen, WHITE, (line_x, y1), (line_x, y2), 5)
 
 
-def handle_game_over():
-    global game_won
-    font = pygame.font.SysFont(None, 48)
-    game_over_text = font.render("Game Over", True, RED)
-    restart_text = font.render("Press Space to restart the game", True, BLACK)
-    game_won_text = font.render("You have completed the race", True, RED)
+def game_loop():
+    global score, distance_traveled, game_won
+    screen.fill(GREEN)
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            client_socket.close()
+            exit()
 
-    game_over_rect = game_over_text.get_rect(
-        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40)
+    keys = pygame.key.get_pressed()
+    handle_road_and_lines()
+    handle_dashed_lines()
+    car_sprite.update_position(
+        keys[pygame.K_LEFT],
+        keys[pygame.K_RIGHT],
+        keys[pygame.K_UP],
+        keys[pygame.K_DOWN],
     )
-    game_won_rect = game_won_text.get_rect(
-        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20)
-    )
-    restart_rect = restart_text.get_rect(
-        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80)
-    )
 
-    if game_won is False:
-        pygame.draw.rect(screen, WHITE, game_over_rect.inflate(20, 20))
-        screen.blit(game_over_text, game_over_rect)
-    else:
-        pygame.draw.rect(screen, WHITE, game_won_rect.inflate(80, 20))
-        screen.blit(game_won_text, game_won_rect)
-        game_won = False
+    # spawn_obstacle()
 
-    # screen.blit(restart_text, restart_rect)
+    # Update and draw all sprites
+    all_sprites.update()
+    all_sprites.draw(screen)
 
+    # Handle collisions
+    if pygame.sprite.spritecollide(
+        car_sprite, obstacles, True, pygame.sprite.collide_mask
+    ):
+        game_won = False  # Set game over state or conditions
+        send_to_server({"action": "game_over", "result": "lose"})
 
-def restart_game():
-    global game_over
-    game_over = False
-    entities.empty()  # Clear all sprites
-    car_sprite = Car(
-        car_ent, SCREEN_WIDTH // 2, SCREEN_HEIGHT - CAR_HEIGHT
-    )  # Create a new car sprite
-    entities.add(car_sprite)  # Add the car sprite back to the entities group
+    # Scoring and distance tracking
+    distance_traveled += speed
+    score = int(distance_traveled * 0.1)
+    score_text = FONT.render(f"Score: {score}", True, BLACK)
+    screen.blit(score_text, (10, 10))
+
+    # Check win condition
+    if distance_traveled >= RACE_DISTANCE:
+        game_won = True
+        send_to_server({"action": "finish", "winner": player_num})
+        pygame.quit()
+        client_socket.close()
+
+    pygame.display.flip()
 
 
 # Main game loop
 clock = pygame.time.Clock()
 running = True
-game_over = False
 
 while running:
-    handle_keypress()
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        # elif event.type == pygame.KEYDOWN:
-        #     if event.key == pygame.K_SPACE and game_over:
-        #         restart_game()
+    if game_state == WAITING_FOR_PLAYERS:
+        draw_waiting_screen()
+    elif game_state == COUNTDOWN:
+        draw_countdown()
+    elif game_state == GAME_RUNNING:
+        game_loop()
 
-    if not game_over:
-        distance_traveled += speed
-        score = int(distance_traveled * 0.1)
-        update_car_movement()
-        draw_bg()
-        handle_road_and_lines()
-        handle_dashed_lines()
-        handle_entities(screen)
-        entities.update()
-        font = pygame.font.SysFont(None, 36)
-        score_text = font.render(f"Score: {score}", True, BLACK)
-        screen.blit(score_text, (10, 10))
-        if distance_traveled >= RACE_DISTANCE:
-            game_over = True
-            game_won = True
-
-    if game_over:
-        handle_game_over()
-
-    pygame.display.flip()
     clock.tick(60)
 
 pygame.quit()
