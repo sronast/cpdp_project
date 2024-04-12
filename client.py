@@ -188,9 +188,10 @@ def spawn_obstacle():
         last_obstacle_spawn_time = pygame.time.get_ticks()
 
 
-def handle_setup(data):
+def handle_setup(d):
     global car_sprite, opponent_car_sprite, all_sprites
-    if data["action"] == "setup":
+    if d["action"] == "ready":
+        data = d["setup"]
         # Initialize your car
         car_color = data["your_color"]
         car_start_pos = data["start_position"]
@@ -233,8 +234,11 @@ def handle_message(json_data):
     global game_state, countdown_timer, opponent_car_sprite, all_sprites
     print("Data received:", json_data)
     if json_data["action"] == "ready":
+        handle_setup(json_data)
+        send_to_server({"action": "ready_ack"})
         game_state = COUNTDOWN
     elif json_data["action"] == "start":
+        print("received start signal from server")
         game_state = GAME_RUNNING
     elif json_data["action"] == "update_position":
         x = json_data["x"]
@@ -242,8 +246,8 @@ def handle_message(json_data):
         # if json_data["player"] != player_number:
         opponent_car_sprite.rect.x = x
         opponent_car_sprite.rect.y = y
-    elif json_data["action"] == "setup":
-        handle_setup(json_data)
+    # elif json_data["action"] == "setup":
+    #     handle_setup(json_data)
 
 
 threading.Thread(target=receive_data, daemon=True).start()
@@ -268,9 +272,9 @@ def draw_countdown():
         if countdown_timer <= 0:
             countdown_timer = 0  # Prevent it from going below zero
             print(f"Current game state is {game_state}")
-            if game_state != GAME_RUNNING:
-                send_to_server({"action": "start"})
-                game_state = GAME_RUNNING  # Ensure this change is made once
+            # if game_state != GAME_RUNNING:
+            #     send_to_server({"action": "start"})
+            #     game_state = GAME_RUNNING  # Ensure this change is made once
 
     screen.fill(BLACK)
     countdown_text = FONT.render(f"Game starting in {countdown_timer}...", True, WHITE)
