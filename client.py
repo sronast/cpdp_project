@@ -36,6 +36,7 @@ game_won = False
 game_state = WAITING_FOR_PLAYERS  # 0: Waiting, 1: Countdown, 2: Running
 countdown_timer = 3
 last_countdown_update = pygame.time.get_ticks()
+last_obstacle_spawn_time = pygame.time.get_ticks()
 
 
 # Network setup
@@ -182,7 +183,7 @@ def spawn_obstacle():
             SCREEN_WIDTH // 2 - ROAD_WIDTH // 2 + EDGE_WIDTH,
             SCREEN_WIDTH // 2 + ROAD_WIDTH // 2 - EDGE_WIDTH,
         )
-        obstacle = Obstacle("./asset/rock.png", obstacle_x, -100)
+        obstacle = Obstacle("./asset/rock3.png", obstacle_x, -100)
         obstacles.add(obstacle)
         all_sprites.add(obstacle)
         last_obstacle_spawn_time = pygame.time.get_ticks()
@@ -322,7 +323,7 @@ def game_loop():
         keys[pygame.K_DOWN],
     )
 
-    # spawn_obstacle()
+    spawn_obstacle()
 
     # Update and draw all sprites
     all_sprites.update()
