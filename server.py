@@ -1,14 +1,18 @@
+import random
 import socket
 import threading
 import json
+import time
 
 HOST = "127.0.0.1"
-PORT = 8849
+PORT = 8848
 SCREEN_WIDTH, SCREEN_HEIGHT = 1000, 800
 MID_ROAD = SCREEN_WIDTH // 2
 LANE_WIDTH = 100
 X1 = player_car_x = MID_ROAD - LANE_WIDTH // 2
 X2 = MID_ROAD + LANE_WIDTH // 2
+ROAD_WIDTH = 400
+EDGE_WIDTH = 5
 
 
 class RaceServer:
@@ -23,6 +27,30 @@ class RaceServer:
         self.start_received = 0
         self.player_score_dict = {}
         self.ready_acks = 0
+        self.last_spawn_time = time.time()
+        self.spawn_interval = 2.0
+        self.running = True
+        self.obstacles = []
+
+    def run(self):
+        while self.running:
+            self.update_game()
+            time.sleep(0.1)
+
+    def update_game(self):
+        current_time = time.time()
+        if (
+            current_time - self.last_spawn_time >= self.spawn_interval
+            and self.game_state == "started"
+        ):
+            self.spawn_obstacle()
+            self.last_spawn_time = current_time
+            self.adjust_difficulty()
+
+    def adjust_difficulty(self):
+        # Decrease spawn interval over time to increase difficulty
+        if self.spawn_interval > 0.5:  # Prevent it from going too low
+            self.spawn_interval *= 0.99  # Spawn faster by 5%
 
     def broadcast(self, message):
         with self.lock:
@@ -32,6 +60,16 @@ class RaceServer:
                     print(f"Sent to {conn.getpeername()}: {message}")
                 except Exception as e:
                     print(f"Failed to send to {number}: {e}")
+
+    def spawn_obstacle(self):
+        obstacle_x = random.randint(
+            SCREEN_WIDTH // 2 - ROAD_WIDTH // 2 + EDGE_WIDTH,
+            SCREEN_WIDTH // 2 + ROAD_WIDTH // 2 - EDGE_WIDTH,
+        )
+        obstacle_y = -100  # Start just above the view
+        obstacle = {"x": obstacle_x, "y": obstacle_y}
+        # self.obstacles.append(obstacle)
+        self.broadcast(json.dumps({"action": "spawn_obstacle", "obstacle": obstacle}))
 
     def handle_client(self, conn, player_number):
         try:
@@ -54,6 +92,7 @@ class RaceServer:
                     if self.ready_acks == 2:
                         print("2 acknowledgment received. Sending start signal")
                         self.broadcast(json.dumps({"action": "start"}))
+                        self.game_state = "started"
                         self.ready_acks = 0
 
                 if message.get("action") == "update_position":
@@ -61,6 +100,19 @@ class RaceServer:
 
                 elif message.get("action") in ["start", "finish"]:
                     self.handle_game_state_changes(message, player_number)
+
+                elif message.get("action") == "game_over":
+                    message = (
+                        json.dumps({"action": "game_won", "loser": player_number})
+                        + "\n"
+                    )
+                    over_message = (
+                        json.dumps({"action": "finished", "loser": player_number})
+                        + "\n"
+                    )
+                    self.broadcast_to_others(player_number, message)
+                    self.broadcast(over_message)
+                    self.game_state = "finished"
 
         except Exception as e:
             print("Error handling client:", e)
@@ -97,6 +149,7 @@ class RaceServer:
         conn.close()
 
     def broadcast_setup_info(self):
+        seed = random.randint(0, 999999999)
         setup_info = {
             1: {
                 "position": (X1, SCREEN_HEIGHT - 180),
@@ -118,11 +171,15 @@ class RaceServer:
                     ],  # Gets the other player's color
                     "start_position": setup_info[player_id]["position"],
                     "opponent_start_position": setup_info[3 - player_id]["position"],
+                    "seed": seed,
                 },
             }
             conn.sendall((json.dumps(message) + "\n").encode())
 
     def start(self):
+        threading.Thread(
+            target=self.run
+        ).start()  # Start the game logic in a separate thread
         while True:
             conn, addr = self.server_socket.accept()
             player_number = len(self.players) + 1
