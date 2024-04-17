@@ -28,7 +28,7 @@ MID_ROAD = SCREEN_WIDTH // 2
 speed = 4
 distance_traveled = 0
 score = 0
-RACE_DISTANCE = 1000
+RACE_DISTANCE = 100000
 WAITING_FOR_PLAYERS = 0
 COUNTDOWN = 1
 GAME_RUNNING = 2
@@ -43,8 +43,8 @@ seed = 0
 
 
 # Network setup
-HOST = "127.0.0.1"
-PORT = 8848
+HOST = "0.0.0.0"
+PORT = 8849
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((HOST, PORT))
 player_num = client_socket.recv(1024).decode()
@@ -263,8 +263,12 @@ def handle_message(json_data):
         opponent_car_sprite.rect.y = y
     elif json_data["action"] == "game_won":
         winning_player = json_data.get("winner", 0)
-        print("winning player is ", winning_player)
-        game_won = winning_player == player_num
+        losing_player = json_data.get("loser", 0)
+        if losing_player != 0 and losing_player != player_num:
+            game_won = True
+        elif winning_player != 0:
+            print("winning player is ", winning_player)
+            game_won = winning_player == player_num
         game_state = GAME_FINISHED
     elif json_data["action"] == "spawn_obstacle":
         create_obstacles(json_data["obstacle"])

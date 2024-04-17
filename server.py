@@ -4,8 +4,8 @@ import threading
 import json
 import time
 
-HOST = "127.0.0.1"
-PORT = 8848
+HOST = "0.0.0.0"
+PORT = 8849
 SCREEN_WIDTH, SCREEN_HEIGHT = 1000, 800
 MID_ROAD = SCREEN_WIDTH // 2
 LANE_WIDTH = 100
@@ -70,7 +70,9 @@ class RaceServer:
         obstacle_y = -100  # Start just above the view
         obstacle = {"x": obstacle_x, "y": obstacle_y}
         # self.obstacles.append(obstacle)
-        # self.broadcast(json.dumps({"action": "spawn_obstacle", "obstacle": obstacle}))
+        self.broadcast(
+            json.dumps({"action": "spawn_obstacle", "obstacle": obstacle}) + "\n"
+        )
 
     def handle_client(self, conn, player_number):
         try:
@@ -92,12 +94,12 @@ class RaceServer:
                     print(f"Received ready acknowledgment from player {player_number}")
                     if self.ready_acks == 2:
                         print("2 acknowledgment received. Sending start signal")
-                        self.broadcast(json.dumps({"action": "start"}))
+                        self.broadcast(json.dumps({"action": "start"}) + "\n")
                         self.game_state = "started"
                         self.ready_acks = 0
 
                 if message.get("action") == "update_position":
-                    self.broadcast_to_others(player_number, json.dumps(message))
+                    self.broadcast_to_others(player_number, json.dumps(message) + "\n")
 
                 elif message.get("action") in ["start", "finish"]:
                     self.handle_game_state_changes(message, player_number)
@@ -112,11 +114,17 @@ class RaceServer:
                         if self.winner == 0:
                             # the one sending the msg first is the winner
 
-                            msg = json.dumps(
-                                {"action": "game_won", "winner": player_number}
+                            msg = (
+                                json.dumps(
+                                    {"action": "game_won", "winner": player_number}
+                                )
+                                + "\n"
                             )
-                            msg_to_loser = json.dumps(
-                                {"action": "game_over", "winner": player_number}
+                            msg_to_loser = (
+                                json.dumps(
+                                    {"action": "game_over", "winner": player_number}
+                                )
+                                + "\n"
                             )
                             self.broadcast_to_others(player_number, msg_to_loser)
                             self.broadcast(msg)
@@ -126,8 +134,7 @@ class RaceServer:
                     else:
                         over_message = (
                             json.dumps({"action": "finished", "loser": player_number})
-                            + "\n"
-                        )
+                        ) + "\n"
                         self.broadcast_to_others(player_number, msg)
                         self.broadcast(over_message)
                         self.game_state = "finished"
@@ -153,14 +160,16 @@ class RaceServer:
             pass
         elif action == "finish":
             # Handle finish
-            self.broadcast(json.dumps({"action": "finish", "winner": player_number}))
+            self.broadcast(
+                json.dumps({"action": "finish", "winner": player_number}) + "\n"
+            )
 
     def cleanup_player(self, player_number, conn):
         with self.lock:
             if player_number in self.players:
                 del self.players[player_number]
                 self.broadcast(
-                    json.dumps({"action": "disconnect", "player": player_number})
+                    json.dumps({"action": "disconnect", "player": player_number}) + "\n"
                 )
                 if self.game_state != "finished":
                     self.game_state = "waiting"
