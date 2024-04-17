@@ -28,7 +28,7 @@ MID_ROAD = SCREEN_WIDTH // 2
 speed = 4
 distance_traveled = 0
 score = 0
-RACE_DISTANCE = 100000
+RACE_DISTANCE = 1000
 WAITING_FOR_PLAYERS = 0
 COUNTDOWN = 1
 GAME_RUNNING = 2
@@ -262,7 +262,9 @@ def handle_message(json_data):
         opponent_car_sprite.rect.x = x
         opponent_car_sprite.rect.y = y
     elif json_data["action"] == "game_won":
-        game_won = True
+        winning_player = json_data.get("winner", 0)
+        print("winning player is ", winning_player)
+        game_won = winning_player == player_num
         game_state = GAME_FINISHED
     elif json_data["action"] == "spawn_obstacle":
         create_obstacles(json_data["obstacle"])
@@ -389,9 +391,9 @@ def game_loop():
     # Check win condition
     if distance_traveled >= RACE_DISTANCE:
         game_won = True
-        send_to_server({"action": "finish", "winner": player_num})
-        pygame.quit()
-        client_socket.close()
+        send_to_server({"action": "game_over", "winner": player_num})
+        # pygame.quit()
+        # client_socket.close()
 
     pygame.display.flip()
 

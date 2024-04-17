@@ -31,6 +31,7 @@ class RaceServer:
         self.spawn_interval = 2.0
         self.running = True
         self.obstacles = []
+        self.winner = 0
 
     def run(self):
         while self.running:
@@ -69,7 +70,7 @@ class RaceServer:
         obstacle_y = -100  # Start just above the view
         obstacle = {"x": obstacle_x, "y": obstacle_y}
         # self.obstacles.append(obstacle)
-        self.broadcast(json.dumps({"action": "spawn_obstacle", "obstacle": obstacle}))
+        # self.broadcast(json.dumps({"action": "spawn_obstacle", "obstacle": obstacle}))
 
     def handle_client(self, conn, player_number):
         try:
@@ -102,17 +103,34 @@ class RaceServer:
                     self.handle_game_state_changes(message, player_number)
 
                 elif message.get("action") == "game_over":
-                    message = (
+                    msg = (
                         json.dumps({"action": "game_won", "loser": player_number})
                         + "\n"
                     )
-                    over_message = (
-                        json.dumps({"action": "finished", "loser": player_number})
-                        + "\n"
-                    )
-                    self.broadcast_to_others(player_number, message)
-                    self.broadcast(over_message)
-                    self.game_state = "finished"
+                    if message.get("winner"):
+                        # winner is only present if game is over
+                        if self.winner == 0:
+                            # the one sending the msg first is the winner
+
+                            msg = json.dumps(
+                                {"action": "game_won", "winner": player_number}
+                            )
+                            msg_to_loser = json.dumps(
+                                {"action": "game_over", "winner": player_number}
+                            )
+                            self.broadcast_to_others(player_number, msg_to_loser)
+                            self.broadcast(msg)
+                            self.game_state = "finished"
+                        else:
+                            pass
+                    else:
+                        over_message = (
+                            json.dumps({"action": "finished", "loser": player_number})
+                            + "\n"
+                        )
+                        self.broadcast_to_others(player_number, msg)
+                        self.broadcast(over_message)
+                        self.game_state = "finished"
 
         except Exception as e:
             print("Error handling client:", e)
